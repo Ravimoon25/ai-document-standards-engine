@@ -859,7 +859,7 @@ IMPORTANT: Return ONLY valid JSON. Be thorough but practical.
 # Step 7: Document Processing Orchestrator - ADD AFTER INDIVIDUAL AGENTS
 
 class DocumentProcessingOrchestrator:
-    """Orchestrates the multi-agent document processing pipeline"""
+    """Orchestrates the multi-agent document processing pipeline with enhanced DOCX generation"""
     
     def __init__(self, standards_retriever):
         self.standards_retriever = standards_retriever
@@ -983,23 +983,30 @@ class DocumentProcessingOrchestrator:
     
     def generate_final_docx(self, content: str, formatting_instructions: List[Dict], 
                            document_settings: Dict, original_file=None) -> bytes:
-        """Generate final DOCX file with all formatting applied"""
+        """Generate final DOCX file with comprehensive formatting support"""
         
         try:
             # Create new document
             doc = Document()
             
-            # Apply document-level settings
+            # Apply document-level settings first
             self._apply_document_settings(doc, document_settings)
             
             # Process formatting instructions
-            for instruction in formatting_instructions:
-                self._apply_formatting_instruction(doc, instruction)
-            
-            # If no instructions, create basic structure
-            if not formatting_instructions:
-                st.warning("No formatting instructions found - creating basic document")
-                self._create_basic_document(doc, content)
+            if formatting_instructions:
+                st.info(f"Applying {len(formatting_instructions)} formatting instructions...")
+                for i, instruction in enumerate(formatting_instructions):
+                    try:
+                        self._apply_formatting_instruction(doc, instruction)
+                    except Exception as e:
+                        st.warning(f"Skipped instruction {i+1}: {str(e)}")
+                        continue
+            else:
+                # Use enhanced fallback structure
+                st.warning("No formatting instructions found - creating enhanced document structure")
+                enhanced_structure = self._create_comprehensive_fallback(content)
+                for instruction in enhanced_structure:
+                    self._apply_formatting_instruction(doc, instruction)
             
             # Convert to bytes
             bio = io.BytesIO()
@@ -1010,12 +1017,18 @@ class DocumentProcessingOrchestrator:
         except Exception as e:
             st.error(f"DOCX generation error: {str(e)}")
             
-            # Create minimal fallback document
+            # Create minimal but functional fallback document
             doc = Document()
             doc.add_heading('Document Processing Results', 0)
-            doc.add_paragraph(f'Processing Error: {str(e)}')
-            doc.add_paragraph('Original Content:')
-            doc.add_paragraph(content)
+            doc.add_paragraph(f'Generation Error: {str(e)}')
+            doc.add_paragraph('')
+            doc.add_heading('Original Content', level=1)
+            
+            # Split content into manageable paragraphs
+            paragraphs = content.split('\n\n')
+            for para in paragraphs[:50]:  # Limit to first 50 paragraphs to avoid issues
+                if para.strip():
+                    doc.add_paragraph(para.strip())
             
             bio = io.BytesIO()
             doc.save(bio)
@@ -1034,63 +1047,340 @@ class DocumentProcessingOrchestrator:
                 section.left_margin = Inches(margins.get('left', 1))
                 section.right_margin = Inches(margins.get('right', 1))
             
-            # Set default font
+            # Set default font for Normal style
             style = doc.styles['Normal']
             font = style.font
             font.name = settings.get('font_family', 'Times New Roman')
             font.size = Pt(settings.get('default_font_size', 12))
             
+            # Set line spacing for Normal style
+            paragraph_format = style.paragraph_format
+            line_spacing = settings.get('line_spacing', 1.5)
+            paragraph_format.line_spacing = line_spacing
+            
         except Exception as e:
             st.warning(f"Document settings application error: {str(e)}")
     
     def _apply_formatting_instruction(self, doc: Document, instruction: Dict):
-        """Apply individual formatting instruction to document"""
+        """Apply individual formatting instruction with comprehensive support"""
         
         try:
-            element_type = instruction.get('type')
+            element_type = instruction.get('type', '').lower()
+            text = instruction.get('text', '')
             
-            if element_type == 'title':
-                heading = doc.add_heading(instruction.get('text', ''), level=0)
+            if element_type in ['title', 'document_title']:
+                heading = doc.add_heading(text, level=0)
                 if instruction.get('alignment') == 'center':
                     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                # Apply title-specific formatting
+                for run in heading.runs:
+                    run.font.size = Pt(instruction.get('font_size', 16))
+                    run.font.bold = instruction.get('bold', True)
+                    
+            elif element_type in ['author', 'authors']:
+                p = doc.add_paragraph(text)
+                if instruction.get('alignment') == 'center':
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    
+            elif element_type in ['date', 'institution']:
+                p = doc.add_paragraph(text)
+                if instruction.get('alignment') == 'center':
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     
             elif element_type == 'heading':
-                level = min(instruction.get('level', 1), 9)
-                text = instruction.get('text', '')
-                doc.add_heading(text, level=level)
-                
-            elif element_type == 'paragraph':
-                text = instruction.get('text', '')
+                level = min(max(instruction.get('level', 1), 1), 9)
                 if text.strip():
-                    p = doc.add_paragraph(text)
+                    heading = doc.add_heading(text, level=level)
+                    # Apply custom formatting if specified
+                    if instruction.get('font_size'):
+                        for run in heading.runs:
+                            run.font.size = Pt(instruction.get('font_size'))
+                            
+            elif element_type in ['paragraph', 'body_text']:
+                if text.strip():
+                    p = doc.add_paragraph()
+                    self._add_formatted_text(p, text)
                     
                     # Apply alignment
-                    alignment = instruction.get('alignment', 'left')
+                    alignment = instruction.get('alignment', 'justify').lower()
                     if alignment == 'center':
                         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     elif alignment == 'right':
                         p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
                     elif alignment == 'justify':
                         p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+                    
+                    # Apply indentation
+                    if instruction.get('first_line_indent'):
+                        p.paragraph_format.first_line_indent = Inches(0.5)
                         
+            elif element_type in ['abstract', 'abstract_text']:
+                if text.strip():
+                    p = doc.add_paragraph()
+                    self._add_formatted_text(p, text)
+                    # Abstract typically has no first-line indent and single spacing
+                    p.paragraph_format.first_line_indent = Inches(0)
+                    p.paragraph_format.line_spacing = 1.0
+                    
+            elif element_type in ['keywords', 'keyword_list']:
+                if text.strip():
+                    p = doc.add_paragraph()
+                    # Handle "Keywords:" label with italic formatting
+                    if text.lower().startswith('keywords'):
+                        parts = text.split(':', 1)
+                        if len(parts) == 2:
+                            keywords_run = p.add_run(parts[0] + ':')
+                            keywords_run.italic = True
+                            p.add_run(' ' + parts[1].strip())
+                        else:
+                            p.add_run(text)
+                    else:
+                        p.add_run(text)
+                        
+            elif element_type in ['list', 'bullet_list', 'numbered_list']:
+                items = instruction.get('items', [])
+                list_style = instruction.get('style', 'bullet').lower()
+                
+                for item in items:
+                    if item.strip():
+                        # Clean up bullet markers if present
+                        clean_item = item.strip()
+                        if clean_item.startswith(('•', '-', '*', '–')):
+                            clean_item = clean_item[1:].strip()
+                            
+                        if 'bullet' in list_style:
+                            doc.add_paragraph(clean_item, style='List Bullet')
+                        else:
+                            doc.add_paragraph(clean_item, style='List Number')
+                            
+            elif element_type in ['table', 'data_table']:
+                headers = instruction.get('headers', [])
+                rows = instruction.get('rows', [])
+                
+                if headers and rows:
+                    table = doc.add_table(rows=len(rows)+1, cols=len(headers))
+                    table.style = 'Table Grid'
+                    
+                    # Add headers with bold formatting
+                    for i, header in enumerate(headers):
+                        cell = table.cell(0, i)
+                        cell.text = str(header)
+                        for paragraph in cell.paragraphs:
+                            for run in paragraph.runs:
+                                run.font.bold = True
+                                
+                    # Add data rows
+                    for row_idx, row_data in enumerate(rows):
+                        for col_idx, cell_data in enumerate(row_data):
+                            if col_idx < len(headers):
+                                table.cell(row_idx+1, col_idx).text = str(cell_data)
+            
+            elif element_type in ['reference', 'citation', 'bibliography_entry']:
+                if text.strip():
+                    p = doc.add_paragraph()
+                    self._add_formatted_text(p, text)
+                    
+                    # Apply hanging indent for references
+                    p.paragraph_format.left_indent = Inches(0.5)
+                    p.paragraph_format.first_line_indent = Inches(-0.5)
+                    p.paragraph_format.line_spacing = 1.0
+                    
+            elif element_type in ['block_quote', 'quote']:
+                if text.strip():
+                    p = doc.add_paragraph()
+                    self._add_formatted_text(p, text)
+                    # Indent block quotes
+                    p.paragraph_format.left_indent = Inches(0.5)
+                    p.paragraph_format.right_indent = Inches(0.5)
+                    
+            else:
+                # Default: treat as paragraph
+                if text.strip():
+                    p = doc.add_paragraph()
+                    self._add_formatted_text(p, text)
+                    
         except Exception as e:
             st.warning(f"Formatting instruction error for {element_type}: {str(e)}")
     
-    def _create_basic_document(self, doc: Document, content: str):
-        """Create basic document structure when no formatting instructions available"""
+    def _add_formatted_text(self, paragraph, text):
+        """Add text with inline formatting support (bold, italic, etc.)"""
+        import re
         
-        doc.add_heading('Processed Document', 0)
+        if not text:
+            return
         
-        # Split content into paragraphs
-        paragraphs = [p.strip() for p in content.split('\n\n') if p.strip()]
+        # Handle various markdown-style formatting
+        # Split by bold markers first (**text**)
+        bold_parts = re.split(r'(\*\*[^*]+\*\*)', text)
         
-        for paragraph in paragraphs:
-            if paragraph:
-                if len(paragraph) < 100 and paragraph.isupper():
-                    doc.add_heading(paragraph, level=1)
-                else:
-                    doc.add_paragraph(paragraph)
-
+        for bold_part in bold_parts:
+            if bold_part.startswith('**') and bold_part.endswith('**'):
+                # Bold text
+                inner_text = bold_part[2:-2]
+                # Check if it also has italic markers
+                italic_parts = re.split(r'(\*[^*]+\*)', inner_text)
+                for italic_part in italic_parts:
+                    if italic_part.startswith('*') and italic_part.endswith('*'):
+                        # Bold and italic
+                        run = paragraph.add_run(italic_part[1:-1])
+                        run.bold = True
+                        run.italic = True
+                    else:
+                        # Just bold
+                        run = paragraph.add_run(italic_part)
+                        run.bold = True
+            else:
+                # Check for italic only
+                italic_parts = re.split(r'(\*[^*]+\*)', bold_part)
+                for italic_part in italic_parts:
+                    if italic_part.startswith('*') and italic_part.endswith('*'):
+                        # Italic text
+                        run = paragraph.add_run(italic_part[1:-1])
+                        run.italic = True
+                    else:
+                        # Regular text - check for journal titles and other italic patterns
+                        if self._should_be_italic(italic_part):
+                            run = paragraph.add_run(italic_part)
+                            run.italic = True
+                        else:
+                            paragraph.add_run(italic_part)
+    
+    def _should_be_italic(self, text):
+        """Determine if text should be italicized based on content"""
+        if not text.strip():
+            return False
+        
+        # Common patterns that should be italic
+        italic_patterns = [
+            r'\b[Jj]ournal of\b',
+            r'\b[Pp]roceedings of\b',
+            r'\b[Rr]eview of\b',
+            r'\b[Aa]nnals of\b',
+            r'\bet al\.\b',
+            r'\bp\.\s*\d+',  # page numbers
+            r'\bvol\.\s*\d+',  # volume numbers
+        ]
+        
+        for pattern in italic_patterns:
+            if re.search(pattern, text):
+                return True
+                
+        return False
+    
+    def _create_comprehensive_fallback(self, content: str) -> List[Dict]:
+        """Create comprehensive document structure preserving all content elements"""
+        
+        structure = []
+        lines = content.split('\n')
+        current_list_items = []
+        in_references = False
+        in_abstract = False
+        
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            if not line:
+                i += 1
+                continue
+            
+            # Flush any accumulated list items
+            if current_list_items and not (line.startswith(('•', '-', '*', '–')) or 
+                                          line.startswith(tuple('123456789')) and '.' in line):
+                structure.append({
+                    "type": "list",
+                    "style": "bullet",
+                    "items": current_list_items,
+                    "font_size": 12
+                })
+                current_list_items = []
+            
+            # Detect major sections
+            line_lower = line.lower()
+            if line_lower in ['abstract', 'introduction', 'methodology', 'methods', 'results', 
+                             'discussion', 'conclusion', 'conclusions', 'references', 'bibliography']:
+                
+                structure.append({
+                    "type": "heading",
+                    "level": 1,
+                    "text": line.title(),
+                    "style": "Heading 1",
+                    "font_size": 14,
+                    "bold": True
+                })
+                
+                in_references = line_lower in ['references', 'bibliography']
+                in_abstract = line_lower == 'abstract'
+                
+            # Detect subsection headings
+            elif (line.endswith(':') or 
+                  (len(line) < 100 and line.istitle()) or
+                  line.startswith(('1.', '2.', '3.', '4.', '5.', 'I.', 'II.', 'III.', 'IV.', 'V.')) or
+                  line.isupper()):
+                
+                # Determine heading level
+                level = 2
+                if line.startswith(('1.', '2.', '3.', 'I.', 'II.')):
+                    level = 2
+                elif line.startswith(('1.1', '2.1', '3.1')) or line.count('.') > 1:
+                    level = 3
+                
+                structure.append({
+                    "type": "heading", 
+                    "level": level,
+                    "text": line,
+                    "style": f"Heading {level}",
+                    "font_size": 14 - level,
+                    "bold": True
+                })
+                
+            # Handle references section content
+            elif in_references and (line[0].isupper() or line.startswith(('1.', '2.', 'A', 'B'))):
+                structure.append({
+                    "type": "reference",
+                    "text": line,
+                    "style": "Reference"
+                })
+                
+            # Handle list items
+            elif line.startswith(('•', '-', '*', '–')):
+                current_list_items.append(line[1:].strip())
+                
+            elif (line.startswith(tuple('123456789')) and 
+                  ('.' in line or ')' in line) and 
+                  line.index(next((c for c in line if c in '.)'), '.')) < 5):
+                current_list_items.append(line)
+                
+            # Handle keywords
+            elif line.lower().startswith('keywords'):
+                structure.append({
+                    "type": "keywords",
+                    "text": line,
+                    "style": "Keywords"
+                })
+                
+            # Handle regular paragraphs
+            else:
+                element_type = "abstract" if in_abstract else "paragraph"
+                structure.append({
+                    "type": element_type,
+                    "text": line,
+                    "style": "Normal",
+                    "alignment": "justify",
+                    "font_size": 12
+                })
+            
+            i += 1
+        
+        # Flush any remaining list items
+        if current_list_items:
+            structure.append({
+                "type": "list",
+                "style": "bullet", 
+                "items": current_list_items,
+                "font_size": 12
+            })
+        
+        return structure
 
 # Step 8: Streamlit Tab Functions - ADD AFTER ORCHESTRATOR
 
