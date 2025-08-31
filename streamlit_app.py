@@ -8,7 +8,6 @@ from datetime import datetime
 import json
 import docx
 import PyPDF2
-import pdfplumber
 
 # Page config
 st.set_page_config(
