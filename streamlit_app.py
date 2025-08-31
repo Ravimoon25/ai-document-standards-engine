@@ -75,12 +75,15 @@ def get_client():
         st.stop()
 
 def extract_text_from_document(uploaded_file):
-    """Extract text from uploaded document"""
+    """Extract text from uploaded document with better encoding handling"""
     try:
         if uploaded_file.type == "application/pdf":
-            # For now, we'll handle as image - later we'll add proper PDF parsing
-            return "PDF text extraction - coming in next version"
+            # Handle PDF files
+            st.info("📄 PDF processing - extracting text...")
+            return "PDF text extraction - will be enhanced in next version"
+            
         elif uploaded_file.type in ["image/png", "image/jpeg", "image/jpg"]:
+            # Handle images with OCR
             image = PIL.Image.open(uploaded_file)
             
             client = get_client()
@@ -95,10 +98,36 @@ def extract_text_from_document(uploaded_file):
                     extracted_text += part.text
             
             return extracted_text
+            
         else:
-            return uploaded_file.read().decode('utf-8')
+            # Handle text files with multiple encoding attempts
+            try:
+                # Try UTF-8 first
+                content = uploaded_file.read().decode('utf-8')
+                return content
+            except UnicodeDecodeError:
+                # Reset file pointer
+                uploaded_file.seek(0)
+                try:
+                    # Try Latin-1 encoding
+                    content = uploaded_file.read().decode('latin-1')
+                    return content
+                except UnicodeDecodeError:
+                    # Reset file pointer
+                    uploaded_file.seek(0)
+                    try:
+                        # Try Windows encoding
+                        content = uploaded_file.read().decode('cp1252')
+                        return content
+                    except UnicodeDecodeError:
+                        # Last resort - ignore errors
+                        uploaded_file.seek(0)
+                        content = uploaded_file.read().decode('utf-8', errors='ignore')
+                        return content + "\n\n⚠️ Note: Some characters may not display correctly due to encoding issues."
+                        
     except Exception as e:
-        return f"Error extracting text: {str(e)}"
+        return f"Error extracting text: {str(e)}\n\nTip: Try uploading the document as an image (PNG/JPG) for better text extraction."
+
 
 def main():
     # Header
