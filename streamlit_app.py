@@ -77,21 +77,21 @@ def get_client():
         st.error(f"Failed to initialize AI client: {str(e)}")
         st.stop()
 
+
 def extract_text_from_document(uploaded_file):
-    """Extract text from uploaded document with proper format handling"""
+    """Extract text from uploaded document - Streamlit Cloud compatible"""
     try:
         file_type = uploaded_file.type
         
         if file_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-            # Handle .docx files properly
+            # Handle .docx files
             st.info("📄 Processing Word document...")
             
-            # Save uploaded file temporarily
             with st.spinner("🔍 Extracting text from Word document..."):
-                # Read the docx file
+                import docx
                 doc = docx.Document(uploaded_file)
                 
-                # Extract text from all paragraphs
+                # Extract text from paragraphs
                 full_text = []
                 for paragraph in doc.paragraphs:
                     if paragraph.text.strip():
@@ -108,54 +108,27 @@ def extract_text_from_document(uploaded_file):
                             full_text.append(" | ".join(row_text))
                 
                 extracted_text = "\n".join(full_text)
-                
-                if extracted_text.strip():
-                    return extracted_text
-                else:
-                    return "No text content found in Word document."
-            
+                return extracted_text if extracted_text.strip() else "No text found in Word document."
+        
         elif file_type == "application/pdf":
-            # Handle PDF files properly
+            # Handle PDF files with PyPDF2 only
             st.info("📄 Processing PDF document...")
             
             with st.spinner("🔍 Extracting text from PDF..."):
-                # Try pdfplumber first (better for complex layouts)
-                try:
-                    with pdfplumber.open(uploaded_file) as pdf:
-                        full_text = []
-                        for page_num, page in enumerate(pdf.pages):
-                            text = page.extract_text()
-                            if text:
-                                full_text.append(f"--- Page {page_num + 1} ---\n{text}")
-                        
-                        extracted_text = "\n\n".join(full_text)
-                        
-                        if extracted_text.strip():
-                            return extracted_text
-                        else:
-                            # Fallback to PyPDF2 if pdfplumber fails
-                            raise Exception("No text extracted with pdfplumber")
+                import PyPDF2
+                pdf_reader = PyPDF2.PdfReader(uploaded_file)
                 
-                except Exception:
-                    # Fallback to PyPDF2
-                    uploaded_file.seek(0)  # Reset file pointer
-                    pdf_reader = PyPDF2.PdfReader(uploaded_file)
-                    
-                    full_text = []
-                    for page_num, page in enumerate(pdf_reader.pages):
-                        text = page.extract_text()
-                        if text:
-                            full_text.append(f"--- Page {page_num + 1} ---\n{text}")
-                    
-                    extracted_text = "\n\n".join(full_text)
-                    
-                    if extracted_text.strip():
-                        return extracted_text
-                    else:
-                        return "PDF appears to be image-based or encrypted. Try uploading as images for OCR processing."
-            
+                full_text = []
+                for page_num, page in enumerate(pdf_reader.pages):
+                    text = page.extract_text()
+                    if text.strip():
+                        full_text.append(f"--- Page {page_num + 1} ---\n{text}")
+                
+                extracted_text = "\n\n".join(full_text)
+                return extracted_text if extracted_text.strip() else "PDF appears to be image-based. Try uploading as image for OCR."
+        
         elif file_type in ["image/png", "image/jpeg", "image/jpg"]:
-            # Handle images with OCR - this already works well
+            # Handle images with OCR
             st.info("🖼️ Processing image with OCR...")
             
             image = PIL.Image.open(uploaded_file)
@@ -164,7 +137,7 @@ def extract_text_from_document(uploaded_file):
                 client = get_client()
                 response = client.models.generate_content(
                     model="gemini-2.5-flash-image-preview",
-                    contents=["Extract all text from this document image, maintaining formatting and structure. If this appears to be a business document, also identify the document type and key information:", image]
+                    contents=["Extract all text from this document image, maintaining formatting and structure:", image]
                 )
                 
                 extracted_text = ""
@@ -173,26 +146,19 @@ def extract_text_from_document(uploaded_file):
                         extracted_text += part.text
                 
                 return extracted_text if extracted_text.strip() else "No text detected in image."
-            
+        
         else:
-            # Handle plain text files
-            st.info("📝 Processing text file...")
-            
+            # Handle text files
             try:
                 content = uploaded_file.read().decode('utf-8')
                 return content
             except UnicodeDecodeError:
                 uploaded_file.seek(0)
-                try:
-                    content = uploaded_file.read().decode('latin-1')
-                    return content
-                except UnicodeDecodeError:
-                    uploaded_file.seek(0)
-                    content = uploaded_file.read().decode('utf-8', errors='ignore')
-                    return content + "\n\n⚠️ Note: Some characters may not display correctly due to encoding issues."
-                    
+                content = uploaded_file.read().decode('utf-8', errors='ignore')
+                return content + "\n\n⚠️ Some characters may not display correctly."
+                
     except Exception as e:
-        return f"Error processing document: {str(e)}\n\n💡 Document processing tips:\n- Ensure file is not password protected\n- For scanned PDFs, try uploading as image\n- For complex layouts, image upload may work better"
+        return f"Error processing document: {str(e)}"
 
 def main():
     # Header
