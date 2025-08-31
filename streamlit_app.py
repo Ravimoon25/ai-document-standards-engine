@@ -1628,3 +1628,7 @@ def main():
         dashboard_tab()  # Keep existing
 
 
+
+# 12. CRITICAL - THE APP ENTRY POINT
+if __name__ == "__main__":
+    main()
